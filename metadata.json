@@ -1,0 +1,6 @@
+{
+  "name": "Dashboard Manajemen Risiko BSKJI Pusat 2026",
+  "description": "Dashboard Eksekutif dan Monitoring Profil Risiko, Risk Register, Heatmap, dan Efektivitas Pengendalian BSKJI Pusat Tahun 2026",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
