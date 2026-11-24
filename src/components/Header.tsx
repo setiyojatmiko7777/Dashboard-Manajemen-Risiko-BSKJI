@@ -1,5 +1,5 @@
 import React from 'react';
-import { ShieldCheck, Building2, Calendar, FileSpreadsheet, Printer, Download, Sparkles } from 'lucide-react';
+import { ShieldCheck, Building2, FileSpreadsheet, Printer, Download, Sparkles, UserCheck, LogOut } from 'lucide-react';
 import { DOCUMENT_METADATA } from '../data/unitInfo';
 import { exportToCSV, exportToJSON, triggerPrint } from '../utils/exportUtils';
 import { RiskItem } from '../types/risk';
@@ -8,9 +8,17 @@ interface HeaderProps {
   filteredRisks: RiskItem[];
   totalRisks: number;
   onOpenInsights?: () => void;
+  username?: string;
+  onLogout?: () => void;
 }
 
-export const Header: React.FC<HeaderProps> = ({ filteredRisks, totalRisks, onOpenInsights }) => {
+export const Header: React.FC<HeaderProps> = ({
+  filteredRisks,
+  totalRisks,
+  onOpenInsights,
+  username,
+  onLogout,
+}) => {
   return (
     <header className="bg-slate-900 text-white border-b border-slate-800 shadow-md sticky top-0 z-30">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3.5">
@@ -89,6 +97,27 @@ export const Header: React.FC<HeaderProps> = ({ filteredRisks, totalRisks, onOpe
               <Printer className="w-3.5 h-3.5 text-slate-300" />
               <span className="hidden sm:inline">Cetak</span>
             </button>
+
+            {/* Authenticated User & Logout Menu */}
+            {username && onLogout && (
+              <div className="flex items-center gap-1.5 pl-1.5 border-l border-slate-700">
+                <div
+                  className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-800/90 border border-slate-700 text-xs text-slate-200"
+                  title={`Masuk sebagai ${username}`}
+                >
+                  <UserCheck className="w-3.5 h-3.5 text-emerald-400" />
+                  <span className="font-mono font-semibold">{username}</span>
+                </div>
+                <button
+                  onClick={onLogout}
+                  className="inline-flex items-center space-x-1.5 px-2.5 py-1.5 rounded-lg bg-rose-950/60 hover:bg-rose-900/80 border border-rose-800/70 text-rose-200 text-xs font-medium transition cursor-pointer"
+                  title="Keluar dari sesi login"
+                >
+                  <LogOut className="w-3.5 h-3.5 text-rose-300" />
+                  <span className="hidden sm:inline">Keluar</span>
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </div>

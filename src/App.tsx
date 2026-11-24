@@ -1,6 +1,6 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { RAW_RISK_DATA } from './data/riskData';
-import { FilterState, RiskItem, SortField, SortDirection } from './types/risk';
+import { FilterState, RiskItem, SortField } from './types/risk';
 import {
   computeKPIData,
   filterRiskData,
@@ -11,6 +11,7 @@ import { Sidebar, NavTab } from './components/Sidebar';
 import { GlobalFilterBar } from './components/GlobalFilterBar';
 import { RiskDetailDrawer } from './components/RiskDetailDrawer';
 import { RiskInsightsPanel } from './components/RiskInsightsPanel';
+import { LoginView, AuthUser } from './components/LoginView';
 
 // Views
 import { DashboardMainView } from './components/views/DashboardMainView';
@@ -29,6 +30,42 @@ import { DataQualityView } from './components/views/DataQualityView';
 import { ReportView } from './components/views/ReportView';
 
 export default function App() {
+  // Authentication state (Bearer token stored strictly in JS/React memory)
+  const [authToken, setAuthToken] = useState<string | null>(null);
+  const [authUser, setAuthUser] = useState<AuthUser | null>(null);
+  const [authChecking, setAuthChecking] = useState(true);
+  const [setupRequired, setSetupRequired] = useState(false);
+
+  const checkAuthStatus = useCallback(async (token: string | null) => {
+    try {
+      const res = await fetch('/api/auth/status', {
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      });
+      if (res.ok) {
+        const data = (await res.json()) as {
+          authenticated: boolean;
+          user: AuthUser | null;
+          setupRequired: boolean;
+        };
+        setSetupRequired(Boolean(data.setupRequired));
+        if (!data.authenticated) {
+          setAuthToken(null);
+          setAuthUser(null);
+        } else if (data.user) {
+          setAuthUser(data.user);
+        }
+      }
+    } catch {
+      // Keep current state if status check fails transiently
+    } finally {
+      setAuthChecking(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void checkAuthStatus(null);
+  }, [checkAuthStatus]);
+
   // Navigation tab state
   const [currentTab, setCurrentTab] = useState<NavTab>('dashboard');
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
@@ -120,6 +157,49 @@ export default function App() {
     setCurrentTab('register');
   };
 
+  const handleAuthSuccess = (token: string, user: AuthUser) => {
+    setAuthToken(token);
+    setAuthUser(user);
+    setSetupRequired(false);
+  };
+
+  const handleLogout = async () => {
+    const currentToken = authToken;
+    setAuthToken(null);
+    setAuthUser(null);
+    setSelectedRisk(null);
+    setIsInsightsOpen(false);
+    try {
+      await fetch('/api/auth/logout', {
+        method: 'POST',
+        headers: currentToken ? { Authorization: `Bearer ${currentToken}` } : undefined,
+      });
+    } catch {
+      // Ignore network errors during logout
+    }
+    void checkAuthStatus(null);
+  };
+
+  if (authChecking) {
+    return (
+      <div className="min-h-screen bg-slate-100 flex flex-col items-center justify-center gap-3 text-slate-600">
+        <div className="w-9 h-9 rounded-full border-3 border-teal-600 border-t-transparent animate-spin" />
+        <p className="text-xs font-semibold tracking-wide uppercase text-slate-500">
+          Memeriksa Sesi Autentikasi...
+        </p>
+      </div>
+    );
+  }
+
+  if (!authUser || !authToken) {
+    return (
+      <LoginView
+        setupRequired={setupRequired}
+        onAuthSuccess={handleAuthSuccess}
+      />
+    );
+  }
+
   return (
     <div className="min-h-screen bg-slate-100 text-slate-800 flex flex-col font-sans selection:bg-teal-500 selection:text-white">
       {/* Top Header */}
@@ -127,6 +207,8 @@ export default function App() {
         filteredRisks={filteredRisks}
         totalRisks={RAW_RISK_DATA.length}
         onOpenInsights={() => setIsInsightsOpen(true)}
+        username={authUser.username}
+        onLogout={() => void handleLogout()}
       />
 
       {/* Main Layout Area */}
