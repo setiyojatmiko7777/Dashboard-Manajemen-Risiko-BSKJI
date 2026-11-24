@@ -34,20 +34,18 @@ export default function App() {
   const [authToken, setAuthToken] = useState<string | null>(null);
   const [authUser, setAuthUser] = useState<AuthUser | null>(null);
   const [authChecking, setAuthChecking] = useState(true);
-  const [setupRequired, setSetupRequired] = useState(false);
 
   const checkAuthStatus = useCallback(async (token: string | null) => {
     try {
       const res = await fetch('/api/auth/status', {
         headers: token ? { Authorization: `Bearer ${token}` } : undefined,
       });
-      if (res.ok) {
+      const contentType = res.headers.get('content-type') || '';
+      if (res.ok && contentType.includes('application/json')) {
         const data = (await res.json()) as {
           authenticated: boolean;
           user: AuthUser | null;
-          setupRequired: boolean;
         };
-        setSetupRequired(Boolean(data.setupRequired));
         if (!data.authenticated) {
           setAuthToken(null);
           setAuthUser(null);
@@ -56,7 +54,7 @@ export default function App() {
         }
       }
     } catch {
-      // Keep current state if status check fails transiently
+      // Static hosting without /api/auth/status
     } finally {
       setAuthChecking(false);
     }
@@ -160,7 +158,6 @@ export default function App() {
   const handleAuthSuccess = (token: string, user: AuthUser) => {
     setAuthToken(token);
     setAuthUser(user);
-    setSetupRequired(false);
   };
 
   const handleLogout = async () => {
@@ -177,7 +174,6 @@ export default function App() {
     } catch {
       // Ignore network errors during logout
     }
-    void checkAuthStatus(null);
   };
 
   if (authChecking) {
@@ -192,12 +188,7 @@ export default function App() {
   }
 
   if (!authUser || !authToken) {
-    return (
-      <LoginView
-        setupRequired={setupRequired}
-        onAuthSuccess={handleAuthSuccess}
-      />
-    );
+    return <LoginView onAuthSuccess={handleAuthSuccess} />;
   }
 
   return (

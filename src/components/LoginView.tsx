@@ -10,6 +10,7 @@ import {
   Building2,
   Loader2,
 } from 'lucide-react';
+import { verifyCredentialsStaticFallback } from '../utils/authVerifier';
 
 export interface AuthUser {
   username: string;
@@ -17,19 +18,29 @@ export interface AuthUser {
 }
 
 interface LoginViewProps {
-  setupRequired: boolean;
   onAuthSuccess: (token: string, user: AuthUser) => void;
 }
 
-export const LoginView: React.FC<LoginViewProps> = ({
-  setupRequired,
-  onAuthSuccess,
-}) => {
+export const LoginView: React.FC<LoginViewProps> = ({ onAuthSuccess }) => {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  const handleStaticFallback = async (trimmedUsername: string, rawPassword: string) => {
+    const valid = await verifyCredentialsStaticFallback(trimmedUsername, rawPassword);
+    if (!valid) {
+      setErrorMessage('Username atau password tidak sesuai.');
+      return;
+    }
+    const localToken =
+      typeof window !== 'undefined' && typeof window.crypto?.randomUUID === 'function'
+        ? `local-${window.crypto.randomUUID()}`
+        : `local-${Date.now()}`;
+    setPassword('');
+    onAuthSuccess(localToken, { username: trimmedUsername, role: 'admin' });
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -43,8 +54,7 @@ export const LoginView: React.FC<LoginViewProps> = ({
 
     setIsSubmitting(true);
     try {
-      const endpoint = setupRequired ? '/api/auth/setup' : '/api/auth/login';
-      const response = await fetch(endpoint, {
+      const response = await fetch('/api/auth/login', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -55,21 +65,29 @@ export const LoginView: React.FC<LoginViewProps> = ({
         }),
       });
 
-      const data = (await response.json()) as {
-        token?: string;
-        user?: AuthUser;
-        error?: string;
-      };
+      const contentType = response.headers.get('content-type') || '';
+      if (contentType.includes('application/json')) {
+        const data = (await response.json()) as {
+          token?: string;
+          user?: AuthUser;
+          error?: string;
+        };
 
-      if (!response.ok || !data.token || !data.user) {
-        setErrorMessage(data.error || 'Username atau password tidak sesuai.');
+        if (!response.ok || !data.token || !data.user) {
+          setErrorMessage(data.error || 'Username atau password tidak sesuai.');
+          return;
+        }
+
+        setPassword('');
+        onAuthSuccess(data.token, data.user);
         return;
       }
 
-      setPassword('');
-      onAuthSuccess(data.token, data.user);
+      // Static publish hosting (no backend API route available)
+      await handleStaticFallback(trimmedUsername, password);
     } catch {
-      setErrorMessage('Tidak dapat terhubung ke server autentikasi. Silakan coba lagi.');
+      // Fallback when backend API is unreachable in static publish environments
+      await handleStaticFallback(trimmedUsername, password);
     } finally {
       setIsSubmitting(false);
     }

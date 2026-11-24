@@ -5,6 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
 import type { NextFunction, Request, Response } from 'express';
+import { AUTH_DIGEST_CONFIG } from './src/utils/authVerifier.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -12,12 +13,6 @@ const __dirname = path.dirname(__filename);
 const PORT = Number(process.env.PORT) || 3000;
 const SESSION_SECRET = process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex');
 const TOKEN_TTL_MS = 8 * 60 * 60 * 1000; // 8 hours
-
-interface StoredAdminCredential {
-  username: string;
-  salt: string;
-  hash: string;
-}
 
 interface SessionPayload {
   sub: string;
@@ -32,34 +27,23 @@ interface AuthenticatedRequest extends Request {
   tokenJti?: string;
 }
 
-// In-memory store for first-run claimed admin credential (used only when env secrets are unset)
-let claimedAdmin: StoredAdminCredential | null = null;
-
 // In-memory revoked token IDs with expiration timestamps
 const revokedTokens = new Map<string, number>();
 
-// Simple in-memory rate limiter for login/setup endpoints
+// Simple in-memory rate limiter for login endpoint
 const failedAttempts = new Map<string, { count: number; resetAt: number }>();
 const MAX_FAILED_ATTEMPTS = 10;
 const RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
 
-function sha256Buffer(value: string): Buffer {
-  return crypto.createHash('sha256').update(value, 'utf8').digest();
+function sha256Hex(value: string): string {
+  return crypto.createHash('sha256').update(value, 'utf8').digest('hex');
 }
 
-function timingSafeEqualString(a: string, b: string): boolean {
-  return crypto.timingSafeEqual(sha256Buffer(a), sha256Buffer(b));
-}
-
-function hashPasswordScrypt(password: string, salt: string): string {
-  return crypto.scryptSync(password, salt, 64).toString('hex');
-}
-
-function verifyPasswordScrypt(password: string, salt: string, expectedHashHex: string): boolean {
-  const derived = crypto.scryptSync(password, salt, 64);
-  const expected = Buffer.from(expectedHashHex, 'hex');
-  if (derived.length !== expected.length) return false;
-  return crypto.timingSafeEqual(derived, expected);
+function timingSafeEqualHex(a: string, b: string): boolean {
+  const bufA = Buffer.from(a, 'hex');
+  const bufB = Buffer.from(b, 'hex');
+  if (bufA.length !== bufB.length) return false;
+  return crypto.timingSafeEqual(bufA, bufB);
 }
 
 // Derive env credential hash once on startup if ADMIN_USERNAME and ADMIN_PASSWORD are provided
@@ -67,18 +51,40 @@ const envUsernameRaw = process.env.ADMIN_USERNAME?.trim() || '';
 const envPasswordRaw = process.env.ADMIN_PASSWORD || '';
 const envConfigured = Boolean(envUsernameRaw && envPasswordRaw);
 const envSalt = crypto.randomBytes(16).toString('hex');
-const envCredential: StoredAdminCredential | null = envConfigured
-  ? {
-      username: envUsernameRaw,
-      salt: envSalt,
-      hash: hashPasswordScrypt(envPasswordRaw, envSalt),
-    }
-  : null;
+const envPasswordScryptHex = envConfigured
+  ? crypto.scryptSync(envPasswordRaw, envSalt, 64).toString('hex')
+  : '';
 
-function getActiveCredential(): StoredAdminCredential | null {
-  // Configured process.env credential always overrides any claimed fallback hash
-  if (envCredential) return envCredential;
-  return claimedAdmin;
+function verifyServerCredentials(username: string, password: string): string | null {
+  const trimmedUsername = username.trim();
+
+  if (envConfigured) {
+    const expectedUserHex = sha256Hex(envUsernameRaw);
+    const providedUserHex = sha256Hex(trimmedUsername);
+    const userOk = timingSafeEqualHex(providedUserHex, expectedUserHex);
+
+    const derivedPassHex = crypto.scryptSync(password, envSalt, 64).toString('hex');
+    const passOk = timingSafeEqualHex(derivedPassHex, envPasswordScryptHex);
+
+    return userOk && passOk ? envUsernameRaw : null;
+  }
+
+  // Fallback to salted PBKDF2 digest when process.env secrets are not set
+  const providedUserHex = sha256Hex(trimmedUsername);
+  const userOk = timingSafeEqualHex(providedUserHex, AUTH_DIGEST_CONFIG.usernameSha256Hex);
+
+  const derivedPassHex = crypto
+    .pbkdf2Sync(
+      password,
+      Buffer.from(AUTH_DIGEST_CONFIG.saltHex, 'hex'),
+      AUTH_DIGEST_CONFIG.iterations,
+      32,
+      'sha256'
+    )
+    .toString('hex');
+  const passOk = timingSafeEqualHex(derivedPassHex, AUTH_DIGEST_CONFIG.passwordPbkdf2Hex);
+
+  return userOk && passOk ? trimmedUsername : null;
 }
 
 function signSessionToken(username: string): string {
@@ -205,68 +211,21 @@ async function startServer(): Promise<void> {
   app.get('/api/auth/status', (req: Request, res: Response) => {
     const token = extractBearerToken(req);
     const payload = token ? verifySessionToken(token) : null;
-    const activeCred = getActiveCredential();
 
     res.json({
       authenticated: Boolean(payload),
       user: payload ? { username: payload.sub, role: payload.role } : null,
-      envConfigured: Boolean(envCredential),
-      setupRequired: !activeCred,
+      envConfigured,
+      setupRequired: false,
     });
   });
 
-  // One-time first-run admin setup/claim route (locked once claimed or when env secrets exist)
-  app.post('/api/auth/setup', (req: Request, res: Response) => {
-    if (getActiveCredential()) {
-      res.status(409).json({
-        error: 'Kredensial akses sudah dikonfigurasi. Silakan gunakan formulir login.',
-      });
-      return;
-    }
-
-    const body = req.body as { username?: unknown; password?: unknown } | undefined;
-    const username = typeof body?.username === 'string' ? body.username.trim() : '';
-    const password = typeof body?.password === 'string' ? body.password : '';
-
-    if (!/^[a-zA-Z0-9._-]{3,64}$/.test(username)) {
-      res.status(400).json({
-        error: 'Username harus terdiri dari 3–64 karakter (huruf, angka, titik, garis bawah, atau tanda hubung).',
-      });
-      return;
-    }
-
-    if (password.length < 6 || password.length > 128) {
-      res.status(400).json({
-        error: 'Password minimal 6 karakter dan maksimal 128 karakter.',
-      });
-      return;
-    }
-
-    const salt = crypto.randomBytes(16).toString('hex');
-    const hash = hashPasswordScrypt(password, salt);
-    claimedAdmin = { username, salt, hash };
-
-    const token = signSessionToken(username);
-    res.status(201).json({
-      token,
-      user: { username, role: 'admin' },
-    });
-  });
-
-  // Standard login route
+  // Login route
   app.post('/api/auth/login', (req: Request, res: Response) => {
     const clientKey = req.ip || 'unknown';
     if (isRateLimited(clientKey)) {
       res.status(429).json({
         error: 'Terlalu banyak percobaan login gagal. Silakan coba lagi dalam beberapa menit.',
-      });
-      return;
-    }
-
-    const activeCred = getActiveCredential();
-    if (!activeCred) {
-      res.status(400).json({
-        error: 'Akun admin belum diaktivasi. Silakan lengkapi aktivasi akses terlebih dahulu.',
       });
       return;
     }
@@ -280,20 +239,18 @@ async function startServer(): Promise<void> {
       return;
     }
 
-    const usernameMatches = timingSafeEqualString(username, activeCred.username);
-    const passwordMatches = verifyPasswordScrypt(password, activeCred.salt, activeCred.hash);
-
-    if (!usernameMatches || !passwordMatches) {
+    const verifiedUser = verifyServerCredentials(username, password);
+    if (!verifiedUser) {
       recordFailedAttempt(clientKey);
       res.status(401).json({ error: 'Username atau password tidak sesuai.' });
       return;
     }
 
     clearFailedAttempts(clientKey);
-    const token = signSessionToken(activeCred.username);
+    const token = signSessionToken(verifiedUser);
     res.json({
       token,
-      user: { username: activeCred.username, role: 'admin' },
+      user: { username: verifiedUser, role: 'admin' },
     });
   });
 
@@ -314,8 +271,13 @@ async function startServer(): Promise<void> {
     res.json({ ok: true });
   });
 
-  // Mount Vite middleware in development, or serve built dist/ in production
-  if (process.env.NODE_ENV !== 'production') {
+  const distDir = path.resolve(__dirname, 'dist');
+  const distIndexHtml = path.join(distDir, 'index.html');
+  const isDevMode =
+    process.env.NODE_ENV !== 'production' &&
+    (process.env.npm_lifecycle_event === 'dev' || !fs.existsSync(distIndexHtml));
+
+  if (isDevMode) {
     const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },
@@ -323,16 +285,14 @@ async function startServer(): Promise<void> {
     });
     app.use(vite.middlewares);
   } else {
-    const distDir = path.resolve(__dirname, 'dist');
     app.use(express.static(distDir));
     app.get('*', (req: Request, res: Response, next: NextFunction) => {
       if (req.path.startsWith('/api/')) {
         next();
         return;
       }
-      const indexHtml = path.join(distDir, 'index.html');
-      if (fs.existsSync(indexHtml)) {
-        res.sendFile(indexHtml);
+      if (fs.existsSync(distIndexHtml)) {
+        res.sendFile(distIndexHtml);
       } else {
         res.status(404).send('Build output not found');
       }
