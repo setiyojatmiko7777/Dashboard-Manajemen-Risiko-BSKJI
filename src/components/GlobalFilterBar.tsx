@@ -26,7 +26,6 @@ export const GlobalFilterBar: React.FC<GlobalFilterBarProps> = ({
     filters.inherentLevel !== 'ALL' ||
     filters.residualLevel !== 'ALL' ||
     filters.controlAdequacy !== 'ALL' ||
-    filters.indicatorStatus !== 'ALL' ||
     (filters.kriteriaRisiko && filters.kriteriaRisiko !== 'ALL') ||
     (filters.seleraRisiko && filters.seleraRisiko !== 'ALL');
 
@@ -74,8 +73,8 @@ export const GlobalFilterBar: React.FC<GlobalFilterBarProps> = ({
         </div>
       </div>
 
-      {/* Filter Select Controls Grid (8 filters) */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2 pt-1 border-t border-slate-100">
+      {/* Filter Select Controls Grid (7 filters) */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2 pt-1 border-t border-slate-100">
         {/* Unit Filter */}
         <div>
           <label className="block text-[10px] font-semibold text-slate-600 mb-1 truncate">
@@ -181,23 +180,6 @@ export const GlobalFilterBar: React.FC<GlobalFilterBarProps> = ({
             <option value="ALL">Semua Kendali</option>
             <option value="Memadai">Memadai (100%)</option>
             <option value="Belum Memadai">Belum Memadai</option>
-          </select>
-        </div>
-
-        {/* Status Capaian Indikator */}
-        <div>
-          <label className="block text-[10px] font-semibold text-slate-600 mb-1 truncate">
-            Status Capaian:
-          </label>
-          <select
-            value={filters.indicatorStatus}
-            onChange={e => onFilterChange({ indicatorStatus: e.target.value })}
-            className="w-full text-xs bg-slate-50 border border-slate-300 rounded-lg px-2 py-1.5 text-slate-800 focus:outline-none focus:ring-1 focus:ring-teal-500 font-medium"
-          >
-            <option value="ALL">Semua Status</option>
-            <option value="Tercapai">Tercapai (≥100%)</option>
-            <option value="Perlu Perhatian">Perlu Perhatian</option>
-            <option value="Perlu Intervensi">Perlu Intervensi</option>
           </select>
         </div>
 

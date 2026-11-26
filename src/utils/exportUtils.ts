@@ -23,10 +23,7 @@ export function exportToCSV(items: RiskItem[], filename = 'Risk_Register_BSKJI_2
     'Dampak Residu',
     'Skor Residu',
     'Level Residu',
-    'Penurunan Skor',
-    'Realisasi',
-    'Capaian (%)',
-    'Status Indikator'
+    'Penurunan Skor'
   ];
 
   const escapeCSV = (str: string | number | undefined | null) => {
@@ -57,10 +54,7 @@ export function exportToCSV(items: RiskItem[], filename = 'Risk_Register_BSKJI_2
     item.residualImpact,
     item.residualScore,
     escapeCSV(item.residualLevel),
-    item.scoreReduction,
-    escapeCSV(item.realisasi || 'Belum tersedia'),
-    escapeCSV(item.capaian || 'Belum tersedia'),
-    escapeCSV(item.indicatorStatus)
+    item.scoreReduction
   ].join(','));
 
   const csvContent = '\uFEFF' + [headers.join(','), ...rows].join('\r\n');

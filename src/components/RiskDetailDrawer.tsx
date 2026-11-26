@@ -99,16 +99,11 @@ export const RiskDetailDrawer: React.FC<RiskDetailDrawerProps> = ({ risk, onClos
               </div>
 
               <div>
-                <span className="text-[11px] font-semibold text-slate-500 block">Target & Capaian:</span>
+                <span className="text-[11px] font-semibold text-slate-500 block">Target:</span>
                 <div className="flex items-center space-x-2 mt-0.5">
                   <span className="text-xs font-bold text-slate-900 bg-white px-2 py-0.5 rounded border border-slate-200">
                     Target: {risk.target}
                   </span>
-                  {risk.realisasi && (
-                    <span className="text-xs text-slate-700">
-                      Real: {risk.realisasi} ({risk.capaian})
-                    </span>
-                  )}
                 </div>
               </div>
             </div>
